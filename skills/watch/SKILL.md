@@ -1,12 +1,12 @@
 ---
 name: watch
-version: "0.2.0"
+version: "0.3.0"
 description: Watch a video (URL or local path). Downloads with yt-dlp, extracts auto-scaled frames with ffmpeg, pulls the transcript from captions (or Whisper API fallback), and hands the result to Claude so it can answer questions about what's in the video.
 argument-hint: "<video-url-or-path> [question]"
 allowed-tools: Bash, Read
-homepage: https://github.com/bradautomates/claude-video
-repository: https://github.com/bradautomates/claude-video
-author: bradautomates
+homepage: https://github.com/donlapidos/claude-video
+repository: https://github.com/donlapidos/claude-video
+author: donlapidos
 license: MIT
 user-invocable: true
 ---
@@ -359,3 +359,5 @@ If you already watched a video this session and the user asks a follow-up, do **
 **Bundled scripts:** `scripts/watch.py` (entry point), `scripts/download.py` (yt-dlp wrapper), `scripts/frames.py` (ffmpeg frame extraction), `scripts/transcribe.py` (caption selection + Whisper orchestration), `scripts/whisper.py` (Groq / OpenAI clients), `scripts/setup.py` (preflight + installer)
 
 Review scripts before first use to verify behavior.
+
+**Provenance:** security-hardened fork of [bradautomates/claude-video](https://github.com/bradautomates/claude-video) by Bradley Bonanno (MIT). Local changes and residual risk are documented in `SECURITY-PATCHES.md` beside this file.
