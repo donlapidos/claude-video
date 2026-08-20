@@ -52,18 +52,53 @@ def parse_vtt(path: str) -> list[dict]:
     return _dedupe(segments)
 
 
+# YouTube's auto-captions arrive as an overlapping stream: a settled line, then
+# that line plus the next one mid-typing, then the next line on its own, and so
+# on. Every cue therefore repeats words already shown. We keep a short window of
+# words already emitted and drop any leading run of a cue that simply repeats
+# it, so each line survives exactly once with its own timestamp.
+DEDUP_TAIL_WORDS = 40
+# Genuine rolling overlap is a whole caption line (5-10 words). Requiring three
+# keeps a real repetition that happens to straddle a line break ("and then" /
+# "and then everything broke") from being silently trimmed.
+MIN_OVERLAP_WORDS = 3
+
+
+def _leading_overlap(tail: list[str], words: list[str]) -> int:
+    """Length of the longest run of `words` that repeats the end of `tail`."""
+    # A cue wholly contained in what we already emitted is duplication by
+    # definition, however short - this is the "settled line" cue in a rolling
+    # stream, and the plain repeated cue. Checked before the word threshold.
+    if words and len(words) <= len(tail) and tail[-len(words):] == words:
+        return len(words)
+    limit = min(len(tail), len(words), DEDUP_TAIL_WORDS)
+    for size in range(limit, MIN_OVERLAP_WORDS - 1, -1):
+        if tail[-size:] == words[:size]:
+            return size
+    return 0
+
+
 def _dedupe(segments: list[dict]) -> list[dict]:
-    """Collapse rolling duplicates common in YouTube auto-subs."""
+    """Collapse the overlap in rolling/scrolling caption streams.
+
+    Emits only words not already emitted. A cue that is wholly a repeat extends
+    the previous segment's time range instead of adding a duplicate line.
+    """
     out: list[dict] = []
+    tail: list[str] = []
     for seg in segments:
-        if out and seg["text"] == out[-1]["text"]:
-            out[-1]["end"] = seg["end"]
+        words = seg["text"].split()
+        if not words:
             continue
-        if out and seg["text"].startswith(out[-1]["text"] + " "):
-            out[-1]["text"] = seg["text"]
-            out[-1]["end"] = seg["end"]
+        fresh = words[_leading_overlap(tail, words):]
+        if not fresh:
+            if out:
+                out[-1]["end"] = seg["end"]
             continue
-        out.append(seg)
+        merged = dict(seg)
+        merged["text"] = " ".join(fresh)
+        out.append(merged)
+        tail = (tail + fresh)[-DEDUP_TAIL_WORDS:]
     return out
 
 

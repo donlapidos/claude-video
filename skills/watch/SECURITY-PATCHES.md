@@ -152,3 +152,74 @@ the ffmpeg 9 and Windows issues above.
 The ffmpeg 9 `-vsync` fix breaks `/watch` for everyone on a current ffmpeg, and
 the credential-handling change addresses the audit finding directly. Both are
 good candidates for a PR to `bradautomates/claude-video`.
+
+---
+
+## Share-readiness pass
+
+Changes made so the fork can be handed to other people rather than just used locally.
+
+### Install paths point at this fork
+
+`.agents/plugins/marketplace.json` carried an **absolute** URL to
+`bradautomates/claude-video`, so an Agent Skills install from this fork would
+have fetched the *unpatched* upstream code. Repointed. `.claude-plugin/marketplace.json`
+uses `"source": "./"` (relative) and was already correct. README/AGENTS.md install
+commands, `plugin.json` / `.codex-plugin/plugin.json` homepage+repository, and the
+`SKILL.md` frontmatter now reference this fork; version bumped to 0.3.0.
+
+Upstream attribution is retained everywhere: LICENSE is untouched (MIT, Bradley
+Bonanno), the README banner and footer credit upstream, and every plugin
+description opens with "Security-hardened fork of bradautomates/claude-video."
+
+The README's two release-download paths pointed at upstream's `releases/latest` —
+the unpatched build. Replaced with the manual/local-build route, since this fork
+publishes no release artifact.
+
+### SessionStart hook (`hooks/scripts/check-setup.sh`)
+
+This runs automatically on every session for plugin installs, and was not covered
+by the original audit pass. It was not malicious — no network, no `eval`, no
+writes, and it never printed a key — but two things were wrong:
+
+- It read API key **values** into shell variables (`HAS_GROQ="$(read_key GROQ_API_KEY)"`)
+  when it only ever needed presence. Now `has_key()` does the emptiness test inside
+  `awk` and prints a fixed `yes`, so the secret never transits a variable or this
+  hook's stdout (which is fed to the agent). `SETUP_COMPLETE`, a non-secret marker,
+  is read by a separate `read_setting()`.
+- The POSIX permission check (`stat -c '%a'`, warn unless `600`/`400`) fired on
+  every session start for every Windows user, because Git Bash reports `0666` for
+  an ordinary file regardless of the NTFS ACL. Now skipped on MINGW/MSYS/CYGWIN,
+  matching the same fix already applied in `setup.py`.
+
+### Rolling-caption dedup (`transcribe.py`)
+
+YouTube auto-captions arrive as an overlapping stream — a settled line, then that
+line plus the next one mid-typing, then the next line settled, and so on — so
+every cue repeats words already shown. Upstream's `_dedupe` handled exact repeats
+and cues that grow in place, but not this interleaving: a real 7-minute video came
+back as 222 segments carrying 4909 words of cue text for 1642 words actually
+spoken, roughly **3x** the transcript the model needs to read.
+
+`_dedupe` now tracks a 40-word window of what it has already emitted and drops
+any leading run of a cue that repeats it, so each line survives once with its own
+timestamp. Verified against the real caption track: 223 segments, 1642 words, zero
+distinct words dropped.
+
+Two guards against over-trimming: a cue wholly contained in what was already
+emitted collapses regardless of length (the plain repeated cue), and otherwise an
+overlap must be at least three words, so a genuine repetition straddling a line
+break ("and then" / "and then everything broke") survives.
+
+**Process note:** the first attempt at this passed its unit tests and then
+destroyed the transcript on real input — it collapsed everything into one segment
+holding only the final line — because the hand-written fixture did not match the
+real interleaving. `tests/test_caption_dedup.py::TestRealCueStreamShape` is built
+from the actual cue shape and fails on that mistake.
+
+### Tests
+
+`tests/test_caption_dedup.py` (17 tests): rolling overlap, real cue-stream shape,
+non-rolling captions passing through untouched, exact-duplicate collapsing,
+under-threshold repetition surviving, and hook hygiene (no key value in output,
+no value-echoing helper in source, clean exit). Suite total: **112 passing**.
