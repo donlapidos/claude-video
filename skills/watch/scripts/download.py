@@ -17,6 +17,14 @@ from urllib.parse import urlparse
 
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".flv", ".wmv"}
 
+# Caption files that may sit beside a local video. Teams, Zoom and Meet all
+# export one alongside the recording, so for the videos people actually upload
+# there is usually an accurate, speaker-attributed transcript already on disk -
+# no Whisper key needed, and no audio leaving the machine.
+SUBTITLE_EXTS = (".vtt", ".srt")
+# Language tags we treat as English when several sidecars exist.
+_EN_TAGS = ("en", "en-us", "en-gb", "eng", "english")
+
 # Hardening applied to every yt-dlp call (W011 mitigation).
 #   --ignore-config            ignore ~/.config/yt-dlp/config so a stale or
 #                              hostile local config cannot inject arguments
@@ -50,6 +58,46 @@ def is_url(source: str) -> bool:
     return True
 
 
+def find_sidecar_subtitle(video_path: Path) -> Path | None:
+    """Return a caption file belonging to `video_path`, or None.
+
+    Matches `<stem>.vtt` / `<stem>.srt` and dotted variants such as
+    `<stem>.en.vtt` or Zoom's `<stem>.transcript.vtt`. Requiring the dot keeps
+    `meeting-2.vtt` from being paired with `meeting.mp4`. VTT is preferred over
+    SRT, and an exact-stem match over a tagged one; among tagged files English
+    wins, otherwise it is the first in sorted order.
+    """
+    stem_lower = video_path.stem.lower()
+    parent = video_path.parent
+    best: tuple[int, int, str, Path] | None = None
+    try:
+        entries = sorted(parent.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        suffix = entry.suffix.lower()
+        if suffix not in SUBTITLE_EXTS:
+            continue
+        name_lower = entry.name.lower()
+        base = name_lower[: -len(suffix)]
+        if base == stem_lower:
+            specificity = 0
+        elif base.startswith(stem_lower + "."):
+            tag = base[len(stem_lower) + 1:]
+            specificity = 1 if tag in _EN_TAGS else 2
+        else:
+            continue
+        try:
+            if not entry.is_file():
+                continue
+        except OSError:
+            continue
+        rank = (specificity, SUBTITLE_EXTS.index(suffix), entry.name, entry)
+        if best is None or rank[:3] < best[:3]:
+            best = rank
+    return best[3] if best else None
+
+
 def resolve_local(path: str) -> dict:
     p = Path(path).expanduser().resolve()
     if not p.exists():
@@ -59,9 +107,12 @@ def resolve_local(path: str) -> dict:
             f"[watch] warning: {p.suffix} is not a known video extension, proceeding anyway",
             file=sys.stderr,
         )
+    sidecar = find_sidecar_subtitle(p)
+    if sidecar is not None:
+        print(f"[watch] using caption file found next to the video: {sidecar.name}", file=sys.stderr)
     return {
         "video_path": str(p),
-        "subtitle_path": None,
+        "subtitle_path": str(sidecar) if sidecar else None,
         "info": {"title": p.name, "url": str(p)},
         "downloaded": False,
     }

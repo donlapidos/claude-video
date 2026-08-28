@@ -15,6 +15,10 @@ TS_RE = re.compile(
     r"(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s+-->\s+(\d{2}):(\d{2}):(\d{2})[.,](\d{3})"
 )
 TAG_RE = re.compile(r"<[^>]+>")
+# WebVTT voice span: `<v Alex Chen>text</v>`. Teams and Meet use these, and the
+# speaker name is worth keeping - so lift it out before the generic tag strip
+# below removes the whole span.
+VOICE_RE = re.compile(r"<v(?:\.[^\s>]+)*\s+([^>]+?)\s*>", re.IGNORECASE)
 
 
 def _to_seconds(h: str, m: str, s: str, ms: str) -> float:
@@ -22,7 +26,10 @@ def _to_seconds(h: str, m: str, s: str, ms: str) -> float:
 
 
 def parse_vtt(path: str) -> list[dict]:
-    text = Path(path).read_text(encoding="utf-8", errors="ignore")
+    """Parse WebVTT, or SRT - the cue-timing regex accepts either separator and
+    SRT's index lines simply do not match, so they are skipped."""
+    # utf-8-sig also copes with the BOM some tools write.
+    text = Path(path).read_text(encoding="utf-8-sig", errors="ignore")
     lines = text.splitlines()
 
     segments: list[dict] = []
@@ -39,7 +46,8 @@ def parse_vtt(path: str) -> list[dict]:
 
         cue_lines: list[str] = []
         while i < len(lines) and lines[i].strip():
-            cleaned = TAG_RE.sub("", lines[i]).strip()
+            raw_line = VOICE_RE.sub(lambda m: m.group(1).strip() + ": ", lines[i])
+            cleaned = TAG_RE.sub("", raw_line).strip()
             if cleaned:
                 cue_lines.append(cleaned)
             i += 1
