@@ -181,7 +181,7 @@ Within a single session, you can skip Step 0 on follow-up `/watch` calls — onc
 ## When to use
 
 - User pastes a video URL (YouTube, Vimeo, X, TikTok, Twitch clip, most yt-dlp-supported sites) and asks about it.
-- User points at a local video file (`.mp4`, `.mov`, `.mkv`, `.webm`, etc.) and asks about it.
+- User points at a local video file (`.mp4`, `.mov`, `.mkv`, `.webm`, etc.) and asks about it. If a caption file sits beside it (common for Teams/Zoom/Meet exports), the transcript comes from there for free — no Whisper key, no audio upload.
 - User types `/watch <url-or-path> [question]`.
 
 ## Recommended limits
@@ -304,10 +304,12 @@ Behavior:
 
 ## Transcription
 
-The script gets a timestamped transcript in one of two ways:
+The script gets a timestamped transcript in one of three ways:
 
-1. **Native captions (free, preferred).** yt-dlp pulls manual or auto-generated subtitles from the source platform if available.
-2. **Whisper API fallback.** If no captions came back (or the source is a local file), the script extracts audio (`ffmpeg -vn -ac 1 -ar 16000 -b:a 64k`, ~0.5 MB/min) and uploads it to whichever Whisper API has a key configured:
+1. **A caption file next to a local video (free, preferred for local files).** For a local path, the script looks for a sibling caption file — `<name>.vtt`, `<name>.srt`, or a dotted variant like `<name>.en.vtt` or Zoom's `<name>.transcript.vtt` — and uses it if found, printing which file it picked. Teams, Zoom and Meet all export one alongside the recording, so an uploaded meeting usually needs no API key at all. WebVTT speaker spans (`<v Alex Chen>`) become `Alex Chen:` prefixes, so speaker attribution survives. A similarly-named file (`meeting-2.vtt` beside `meeting.mp4`) is deliberately *not* paired.
+
+2. **Native captions (free, preferred for URLs).** yt-dlp pulls manual or auto-generated subtitles from the source platform if available.
+3. **Whisper API fallback.** If no captions came back (or the source is a local file), the script extracts audio (`ffmpeg -vn -ac 1 -ar 16000 -b:a 64k`, ~0.5 MB/min) and uploads it to whichever Whisper API has a key configured:
    - **Groq** — `whisper-large-v3`. Preferred default: cheaper, faster. Get a key at console.groq.com/keys.
    - **OpenAI** — `whisper-1`. Fallback. Get a key at platform.openai.com/api-keys.
 
@@ -335,6 +337,7 @@ If you already watched a video this session and the user asks a follow-up, do **
 **What this skill does:**
 - Runs `yt-dlp` locally to download the video and pull native captions when the source supports them (public data; the request goes directly to whatever host the URL points at)
 - Runs `ffmpeg` / `ffprobe` locally to extract frames as JPEGs and, when Whisper is needed, a mono 16 kHz audio clip
+- Reads a caption file sitting next to a local video when one exists (local disk only, no network) — this is preferred over Whisper, so an uploaded recording with its own transcript never has audio sent anywhere
 - Sends the extracted audio clip to Groq's Whisper API (`api.groq.com/openai/v1/audio/transcriptions`) when `GROQ_API_KEY` is set (preferred — cheaper, faster)
 - Sends the extracted audio clip to OpenAI's audio transcription API (`api.openai.com/v1/audio/transcriptions`) when `OPENAI_API_KEY` is set and Groq is not, or when `--whisper openai` is forced
 - Writes the downloaded video, frames, audio, and an intermediate transcript to a working directory under the system temp dir (or `--out-dir` if specified) so Claude can `Read` them

@@ -223,3 +223,35 @@ from the actual cue shape and fails on that mistake.
 non-rolling captions passing through untouched, exact-duplicate collapsing,
 under-threshold repetition surviving, and hook hygiene (no key value in output,
 no value-echoing helper in source, clean exit). Suite total: **112 passing**.
+
+---
+
+## Local caption sidecars
+
+Upstream's local-file path hardcoded `subtitle_path: None`, so a caption file
+sitting directly beside a video was never looked for. A local recording therefore
+always fell through to Whisper, which means an API key and — more importantly —
+**uploading the meeting's audio to a third party**.
+
+`find_sidecar_subtitle()` now looks for `<stem>.vtt` / `<stem>.srt` and dotted
+variants (`<stem>.en.vtt`, Zoom's `<stem>.transcript.vtt`), preferring an exact
+stem match over a tagged one, VTT over SRT, and English among tagged files.
+Requiring the dot separator stops `meeting-2.vtt` being paired with
+`meeting.mp4`. The chosen file is named on stderr.
+
+Why it matters beyond convenience: Teams, Zoom and Meet all export a caption
+file with the recording, so for internal videos the accurate, speaker-attributed
+transcript is already on disk. Using it keeps audio off the network entirely —
+the privacy-preserving path is now also the default one.
+
+Two supporting changes: WebVTT speaker spans (`<v Alex Chen>`) become
+`Alex Chen:` prefixes instead of being stripped with the rest of the tags, so
+speaker attribution survives; and `parse_vtt` reads as `utf-8-sig` to tolerate a
+BOM. SRT already parsed — the cue-timing regex accepts either separator and
+index lines simply do not match — and there are now tests pinning that.
+
+`tests/test_sidecar_captions.py` (19 tests): pairing for each naming convention,
+preference order, the mis-pairing guard, speaker-name extraction, YouTube timing
+tags still being stripped, SRT and BOM parsing, and two end-to-end runs proving a
+local video with a sidecar produces a real transcript with `--no-whisper` while
+one without still reports cleanly. Suite total: **131 passing**.
